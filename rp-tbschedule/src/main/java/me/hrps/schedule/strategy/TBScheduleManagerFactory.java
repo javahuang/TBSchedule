@@ -353,6 +353,10 @@ public class TBScheduleManagerFactory implements ApplicationContextAware, SmartI
         return hostName;
     }
 
+    public ZKManager getZkManager() {
+        return zkManager;
+    }
+
     /**
      * 初始化线程
      */

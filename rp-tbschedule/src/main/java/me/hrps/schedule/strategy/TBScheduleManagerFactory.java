@@ -164,7 +164,6 @@ public class TBScheduleManagerFactory implements ApplicationContextAware, SmartI
                 timerTask = new ManagerFactoryTimerTask(this);
                 timer.schedule(timerTask, 2000, this.timeInterval);
             }
-
         }
     }
 

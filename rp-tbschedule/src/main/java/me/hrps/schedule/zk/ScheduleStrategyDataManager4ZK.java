@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledFuture;
 import java.util.stream.Collectors;
 
 /**
@@ -312,14 +313,26 @@ public class ScheduleStrategyDataManager4ZK {
                             task.parseArgStrToArgs();
                             needReloadTask = true;
                         }
+                        if ( currTask.isStartRun()) { // 任务非运行状态
+                            needReloadTask = true;
+                        }
                     }
                     if (!needReloadTask) {
                         return;
                     }
                     task.setMsg(null);
-                    // 等待任务运行完毕之后再重新设置调度任务
-                    while (task.isRunning()) {
+                    // 等待任务运行完毕
+                    while (currTask.getCurrThread() != null) {
                         Thread.sleep(20);
+                    }
+                    // 如果已经有准备运行的任务，取消并重新装载
+                    ScheduledFuture<?> futureTask = taskProcessor.getScheduledResult().get(task.getTaskName());
+                    if (futureTask != null && !futureTask.isDone()) {
+                        futureTask.cancel(false);
+                    }
+                    // 立即开始执行任务
+                    if (currTask.isStartRun()) {
+                        task.setRunning(true);
                     }
                     taskProcessor.scheduleTask(task);
                 }, pool);
@@ -335,4 +348,5 @@ public class ScheduleStrategyDataManager4ZK {
         String zkPath = this.PATH_ScheduledTask + "/" + managerFactory.getUuid() + "$" + task.getTaskName();
         this.zkClient.setData().forPath(zkPath, this.gson.toJson(task).getBytes());
     }
+
 }

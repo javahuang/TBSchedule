@@ -70,29 +70,31 @@ public class TBScheduledTaskProcessor implements Runnable {
      * @param task
      */
     public void scheduleTask(ScheduledMethodRunnable task) {
-        // 显示错误信息
-        if (task.getMsg() != null) {
-            refreshTaskRunningInfo(task);
-            return;
-        }
-        try {
-            String taskName = task.getTaskName();
-            // 如果任务已经在计划中，则取消
-            if (scheduledResult.get(taskName) != null) {
-                scheduledResult.get(taskName).cancel(false);
+        // 不允许多个线程同时调度一个任务
+        synchronized (task) {
+            // 显示错误信息
+            if (task.getMsg() != null) {
+                refreshTaskRunningInfo(task);
+                return;
             }
-            CronExpression cronExp = new CronExpression(task.getCron());
-            Date startTime = cronExp.getNextValidTimeAfter(new Date());
-            ScheduledFuture<?> future = taskScheduler.schedule(task, startTime);
-            scheduledResult.put(taskName, future);
-        } catch (ParseException p) {    // cron 表达式解析失败
-            task.setMsg("cron表达式错误");
-            refreshTaskRunningInfo(task);
-            logger.error("任务{}cron 表达式设置错误", task.getTaskName(), p);
-        } catch (Exception e) {
-            logger.error("任务{}调度失败", task.getTaskName(), e);
+            try {
+                String taskName = task.getTaskName();
+                if (task.isRunning()) {
+                    taskScheduler.schedule(task, new Date());
+                    return;
+                }
+                CronExpression cronExp = new CronExpression(task.getCron());
+                Date startTime = cronExp.getNextValidTimeAfter(new Date());
+                ScheduledFuture<?> future = taskScheduler.schedule(task, startTime);
+                scheduledResult.put(taskName, future);
+            } catch (ParseException p) {    // cron 表达式解析失败
+                task.setMsg("cron表达式错误");
+                refreshTaskRunningInfo(task);
+                logger.error("任务{}cron 表达式设置错误", task.getTaskName(), p);
+            } catch (Exception e) {
+                logger.error("任务{}调度失败", task.getTaskName(), e);
+            }
         }
-
     }
 
     private void getTaskScheduler() {
@@ -131,5 +133,10 @@ public class TBScheduledTaskProcessor implements Runnable {
             logger.error("刷新运行时任务({})信息失败", task.getTaskName(), e);
         }
     }
+
+    public Map<String, ScheduledFuture> getScheduledResult() {
+        return scheduledResult;
+    }
+
 
 }

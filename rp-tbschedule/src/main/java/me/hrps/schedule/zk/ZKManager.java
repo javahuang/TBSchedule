@@ -2,6 +2,7 @@ package me.hrps.schedule.zk;
 
 import com.google.common.collect.Lists;
 import me.hrps.schedule.config.TBScheduleConfig;
+import me.hrps.schedule.strategy.TBScheduleManagerFactory;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
@@ -35,14 +36,16 @@ public class ZKManager {
     private CuratorFramework client;
     private List<ACL> aclList = Lists.newArrayList();
     private boolean isCheckParentPath = true;
+    private final TBScheduleManagerFactory factory;
 
 
     private enum keys {
         zkConnectString, zkRootPath, zkSessionTimeout, zkUserName, zkPassword, zkIsCheckParentPath
     }
 
-    public ZKManager(TBScheduleConfig config) throws Exception {
+    public ZKManager(TBScheduleConfig config, TBScheduleManagerFactory factory) throws Exception {
         this.config = config;
+        this.factory = factory;
         this.connect();
     }
 
@@ -71,7 +74,7 @@ public class ZKManager {
                 .connectString((String) config.get(keys.zkConnectString.toString()))
                 .namespace(namespace)
                 .sessionTimeoutMs((Integer) config.get(keys.zkSessionTimeout.toString()))
-                .retryPolicy(new ExponentialBackoffRetry(1000, 10))
+                .retryPolicy(new ExponentialBackoffRetry(1000, 2))
                 .defaultData(null);  // forPath() 的时候不设置默认值
         if (authString != null) {
             builder.authorization("digest", authString.getBytes());
@@ -80,10 +83,15 @@ public class ZKManager {
         client.getConnectionStateListenable().addListener((client, newState) -> {
             if (newState.isConnected()) {
                 logger.info("收到 ZK 连接成功事件！");
+                try {
+                    factory.initialData(this);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
                 connectedLatch.countDown();
             } else {
-                System.out.println("connected");
                 logger.info("连接失败。");
+                factory.stopServer();
                 connectedLatch.countDown();
             }
         });
@@ -113,7 +121,7 @@ public class ZKManager {
      * @return 检查 zookeeper 是否已连接
      */
     public boolean isZkConnected() {
-        return this.client.getState() == CuratorFrameworkState.STARTED;
+        return this.client.getZookeeperClient().isConnected();
     }
 
     public String getConnectStr() {

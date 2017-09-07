@@ -13,16 +13,12 @@ import me.hrps.schedule.taskmanager.ScheduledMethodRunnable;
 import me.hrps.schedule.taskmanager.TBScheduledTaskProcessor;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.curator.framework.CuratorFramework;
-import org.apache.curator.framework.recipes.cache.NodeCache;
 import org.apache.zookeeper.CreateMode;
 
 import java.sql.Timestamp;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledFuture;
 import java.util.stream.Collectors;
 
 /**
@@ -79,7 +75,7 @@ public class ScheduleStrategyDataManager4ZK {
         } else {
             String factoryZkPath = PATH_ManagerFactory + "/" + managerFactory.getUuid();
             if (zkClient.checkExists().forPath(factoryZkPath) == null) {
-                zkClient.create().withMode(CreateMode.EPHEMERAL_SEQUENTIAL).withACL(zkManager.getAclList()).forPath(factoryZkPath);
+                zkClient.create().withMode(CreateMode.EPHEMERAL).withACL(zkManager.getAclList()).forPath(factoryZkPath);
             }
         }
         List<String> result = Lists.newArrayList();
@@ -273,6 +269,23 @@ public class ScheduleStrategyDataManager4ZK {
         this.zkClient.setData().forPath(zkPath, value.getBytes());
     }
 
+
+    public void unRegisterScheduleTasks(TBScheduleManagerFactory managerFactory) {
+        String zkBasePath = this.PATH_ScheduledTask + "/" + managerFactory.getUuid();
+        TBScheduledAnnotationBeanPostProcessor annotationProcessor = managerFactory.getApplicationContext().getBean(TBScheduledAnnotationBeanPostProcessor.class);
+        Set<ScheduledMethodRunnable> tasks = annotationProcessor.getScheduledTasks();
+        tasks.forEach(task -> {
+            String zkPath = zkBasePath + "$" + task.getTaskName();
+            try {
+                if (this.zkClient.checkExists().forPath(zkPath) != null) {
+                    this.zkClient.delete().forPath(zkPath);
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
     /**
      * 注册调度任务，名称为 factoryId$beanName$methodName
      *
@@ -284,58 +297,16 @@ public class ScheduleStrategyDataManager4ZK {
         String zkBasePath = this.PATH_ScheduledTask + "/" + managerFactory.getUuid();
         TBScheduledAnnotationBeanPostProcessor annotationProcessor = managerFactory.getApplicationContext().getBean(TBScheduledAnnotationBeanPostProcessor.class);
         Set<ScheduledMethodRunnable> tasks = annotationProcessor.getScheduledTasks();
-        ExecutorService pool = Executors.newSingleThreadExecutor();
         tasks.forEach(task -> {
             String zkPath = zkBasePath + "$" + task.getTaskName();
             try {
                 // 设置 processor
                 task.setProcessor(taskProcessor);
-                this.zkClient.create().withMode(CreateMode.EPHEMERAL).withACL(this.zkManager.getAclList()).forPath(zkPath);
+                if (this.zkClient.checkExists().forPath(zkPath) == null) {
+                    this.zkClient.create().withMode(CreateMode.EPHEMERAL).withACL(this.zkManager.getAclList()).forPath(zkPath);
+                }
                 // 设置数据
                 this.zkClient.setData().forPath(zkPath, this.gson.toJson(task).getBytes());
-                // 监听节点数据变化
-                NodeCache nodeCache = new NodeCache(this.zkClient, zkPath, false);
-                nodeCache.start(true);
-                // 判断节点的 cron 表达式和方法参数是否变化
-                nodeCache.getListenable().addListener(() -> {
-                    ScheduledMethodRunnable currTask = this.gson.fromJson(new String(nodeCache.getCurrentData().getData()), ScheduledMethodRunnable.class);
-                    boolean needReloadTask = false;
-                    if (currTask == null || currTask.getCron() == null) {
-                        task.setMsg("配置异常");
-                        needReloadTask = true;
-                    } else {
-                        if (!currTask.getCron().equalsIgnoreCase(task.getCron())) {
-                            task.setCron(currTask.getCron());
-                            needReloadTask = true;
-                        }
-                        if (!StringUtils.equalsIgnoreCase(task.getArgStr(), currTask.getArgStr())) {
-                            task.setArgStr(currTask.getArgStr());
-                            task.parseArgStrToArgs();
-                            needReloadTask = true;
-                        }
-                        if ( currTask.isStartRun()) { // 任务非运行状态
-                            needReloadTask = true;
-                        }
-                    }
-                    if (!needReloadTask) {
-                        return;
-                    }
-                    task.setMsg(null);
-                    // 等待任务运行完毕
-                    while (currTask.getCurrThread() != null) {
-                        Thread.sleep(20);
-                    }
-                    // 如果已经有准备运行的任务，取消并重新装载
-                    ScheduledFuture<?> futureTask = taskProcessor.getScheduledResult().get(task.getTaskName());
-                    if (futureTask != null && !futureTask.isDone()) {
-                        futureTask.cancel(false);
-                    }
-                    // 立即开始执行任务
-                    if (currTask.isStartRun()) {
-                        task.setRunning(true);
-                    }
-                    taskProcessor.scheduleTask(task);
-                }, pool);
             } catch (Exception e) {
                 e.printStackTrace();
             }
@@ -346,7 +317,9 @@ public class ScheduleStrategyDataManager4ZK {
 
     public void refreshScheduledTask(TBScheduleManagerFactory managerFactory, ScheduledMethodRunnable task) throws Exception {
         String zkPath = this.PATH_ScheduledTask + "/" + managerFactory.getUuid() + "$" + task.getTaskName();
+        if (this.zkClient.checkExists().forPath(zkPath) == null) {
+            this.zkClient.create().withMode(CreateMode.EPHEMERAL).forPath(zkPath);
+        }
         this.zkClient.setData().forPath(zkPath, this.gson.toJson(task).getBytes());
     }
-
 }

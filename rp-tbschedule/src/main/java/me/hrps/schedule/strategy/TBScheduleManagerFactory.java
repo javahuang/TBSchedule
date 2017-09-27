@@ -13,13 +13,11 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;
-import org.springframework.beans.factory.BeanFactory;
-import org.springframework.beans.factory.BeanFactoryAware;
-import org.springframework.beans.factory.BeanNameAware;
-import org.springframework.beans.factory.SmartInitializingSingleton;
+import org.springframework.beans.factory.*;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
 
+import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -31,7 +29,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * Author: huangrupeng
  * Create: 17/7/6 下午10:11
  */
-public class TBScheduleManagerFactory implements ApplicationContextAware, SmartInitializingSingleton, BeanFactoryAware, BeanNameAware {
+public class TBScheduleManagerFactory implements ApplicationContextAware, SmartInitializingSingleton, BeanFactoryAware, BeanNameAware, DisposableBean {
     private static transient Logger logger = LoggerFactory.getLogger(TBScheduleManagerFactory.class);
 
     private ApplicationContext applicationContext;
@@ -118,6 +116,19 @@ public class TBScheduleManagerFactory implements ApplicationContextAware, SmartI
         } catch (Exception e) {
             logger.error("TBSchedule 初始化失败", e);
         }
+    }
+
+    @Override
+    public void destroy() throws Exception {
+        TBScheduledTaskProcessor.nodeCacheList.forEach(nodeCache -> {
+            try {
+                nodeCache.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        });
+        this.stopServer();
+        this.zkManager.close();
     }
 
     /**

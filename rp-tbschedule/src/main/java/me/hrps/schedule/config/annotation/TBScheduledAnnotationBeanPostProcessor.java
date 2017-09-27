@@ -65,7 +65,9 @@ public class TBScheduledAnnotationBeanPostProcessor
 
     @Override
     public void destroy() throws Exception {
-
+        synchronized (this.scheduledTasks) {
+            this.scheduledTasks.clear();
+        }
     }
 
     @Override

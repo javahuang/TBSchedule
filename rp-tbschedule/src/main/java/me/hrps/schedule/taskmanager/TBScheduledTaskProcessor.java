@@ -1,5 +1,6 @@
 package me.hrps.schedule.taskmanager;
 
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -22,6 +23,7 @@ import org.springframework.scheduling.concurrent.ConcurrentTaskScheduler;
 import java.sql.Timestamp;
 import java.text.ParseException;
 import java.util.Date;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -53,6 +55,7 @@ public class TBScheduledTaskProcessor implements Runnable {
 
     static Map<String, ScheduledFuture> scheduledResult = Maps.newConcurrentMap();
     static Map<String, Boolean> watchedTasks = Maps.newConcurrentMap();
+    public static List<NodeCache> nodeCacheList = Lists.newArrayList();
 
     public TBScheduledTaskProcessor(TBScheduleManagerFactory factory, ScheduleStrategyDataManager4ZK strategyDataManager) {
         this.factory = factory;
@@ -70,12 +73,8 @@ public class TBScheduledTaskProcessor implements Runnable {
             Set<ScheduledMethodRunnable> tasks = strategyDataManager.registerScheduledTasks(factory, this);
             // 添加监听
             watchTasks(tasks);
-            // 取消调度的任务
-            scheduledResult.forEach((taskName, future) -> {
-                if (!future.isDone()) {
-                    future.cancel(false);
-                }
-            });
+            // 如果有任务正在运行，则取消
+            cancelTasks();
             // 开始任务调度
             for (ScheduledMethodRunnable task : tasks) {
                 scheduleTask(task);
@@ -83,6 +82,15 @@ public class TBScheduledTaskProcessor implements Runnable {
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    public static void cancelTasks() {
+        // 取消调度的任务
+        scheduledResult.forEach((taskName, future) -> {
+            if (!future.isDone()) {
+                future.cancel(false);
+            }
+        });
     }
 
     private void watchTasks(Set<ScheduledMethodRunnable> tasks) throws Exception {
@@ -96,6 +104,7 @@ public class TBScheduledTaskProcessor implements Runnable {
                 }
                 NodeCache nodeCache = new NodeCache(this.factory.getZkManager().getClient(), zkPath, false);
                 nodeCache.start(true);
+                nodeCacheList.add(nodeCache);
                 watchedTasks.put(zkPath, true);
                 // 判断节点的 cron 表达式和方法参数是否变化
                 nodeCache.getListenable().addListener(() -> {
